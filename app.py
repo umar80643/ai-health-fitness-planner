@@ -1,6 +1,5 @@
 import streamlit as st
-from agno.agent import Agent
-from agno.models.google import Gemini
+import google.generativeai as genai
 
 # ---------------- PAGE CONFIG ---------------- #
 st.set_page_config(
@@ -38,12 +37,12 @@ if not api_key:
 
 # ---------------- GEMINI MODEL ---------------- #
 try:
-    model = Gemini(
-        id="gemini-2.5-flash",
-        api_key=api_key
-    )
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+    "models/gemini-2.5-flash"
+)
 except Exception as e:
-    st.error(e)
+    st.error(f"Error loading Gemini: {e}")
     st.stop()
 
 # ---------------- USER INPUT ---------------- #
@@ -54,6 +53,7 @@ col1, col2 = st.columns(2)
 with col1:
     age = st.number_input("Age", 15, 80, 23)
     height = st.number_input("Height (cm)", 100.0, 250.0, 170.0)
+
     activity = st.selectbox(
         "Activity Level",
         [
@@ -66,7 +66,12 @@ with col1:
 
 with col2:
     weight = st.number_input("Weight (kg)", 20.0, 200.0, 70.0)
-    gender = st.selectbox("Gender", ["Male", "Female"])
+
+    gender = st.selectbox(
+        "Gender",
+        ["Male", "Female"]
+    )
+
     goal = st.selectbox(
         "Goal",
         [
@@ -103,17 +108,15 @@ activity_multiplier = {
 
 daily_calories = int(bmr * activity_multiplier[activity])
 
-st.info(
-    f"""
+st.info(f"""
 BMI: **{bmi}**
 
 BMR: **{int(bmr)} kcal**
 
 Daily Maintenance Calories: **{daily_calories} kcal**
-"""
-)
+""")
 
-# ---------------- GENERATE BUTTON ---------------- #
+# ---------------- GENERATE PLAN ---------------- #
 if st.button("Generate Plan"):
 
     profile = f"""
@@ -129,35 +132,45 @@ Goal: {goal}
 Diet Preference: {diet_type}
 """
 
-    diet_agent = Agent(
-        model=model,
-        instructions=[
-            "Create a one-day meal plan.",
-            "Include breakfast, lunch, dinner and snacks.",
-            "Mention calories approximately.",
-            "Keep recommendations practical."
-        ]
-    )
+    with st.spinner("Generating your plans..."):
 
-    fitness_agent = Agent(
-        model=model,
-        instructions=[
-            "Create a workout routine.",
-            "Include warm-up.",
-            "Include exercises and sets.",
-            "Include cool down."
-        ]
-    )
+        diet_prompt = f"""
+Create a healthy one-day meal plan.
 
-    with st.spinner("Generating..."):
+Include:
+- Breakfast
+- Lunch
+- Dinner
+- Snacks
+- Approximate calories
 
-        diet_response = diet_agent.run(profile)
-        fitness_response = fitness_agent.run(profile)
+User Details:
+{profile}
+"""
 
-        st.session_state.diet_plan = diet_response.content
-        st.session_state.fitness_plan = fitness_response.content
+        fitness_prompt = f"""
+Create a fitness routine.
 
-# ---------------- DISPLAY ---------------- #
+Include:
+- Warm-up
+- Exercises with sets and reps
+- Cool-down
+
+User Details:
+{profile}
+"""
+
+        try:
+            diet_response = model.generate_content(diet_prompt)
+            fitness_response = model.generate_content(fitness_prompt)
+
+            st.session_state.diet_plan = diet_response.text
+            st.session_state.fitness_plan = fitness_response.text
+
+        except Exception as e:
+            st.error(f"Generation Error: {e}")
+
+# ---------------- DISPLAY PLANS ---------------- #
 if st.session_state.diet_plan:
 
     st.header("🥗 Diet Plan")
@@ -166,13 +179,13 @@ if st.session_state.diet_plan:
     st.header("💪 Workout Plan")
     st.markdown(st.session_state.fitness_plan)
 
-# ---------------- Q&A ---------------- #
+# ---------------- Q&A SECTION ---------------- #
 if st.session_state.diet_plan:
 
     st.header("❓ Ask Questions")
 
     question = st.text_input(
-        "Ask anything about your plan"
+        "Ask anything about your generated plans"
     )
 
     if st.button("Get Answer"):
@@ -188,8 +201,9 @@ User Question:
 {question}
 """
 
-        qa_agent = Agent(model=model)
+        try:
+            response = model.generate_content(context)
+            st.success(response.text)
 
-        response = qa_agent.run(context)
-
-        st.success(response.content)
+        except Exception as e:
+            st.error(f"Error: {e}")
